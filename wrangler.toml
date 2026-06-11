@@ -1,0 +1,11 @@
+name = "toledo-swift-haul-api"
+main = "worker/index.js"
+compatibility_date = "2024-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "toledo-swift-haul-calls"
+database_id = "REPLACE_AT_DEPLOY"
+
+[vars]
+PUBLIC_PHONE = "+15677773443"

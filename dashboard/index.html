@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Call Dashboard — Toledo Swift Haul</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="login-view" class="login-panel">
+    <h2>Toledo Swift Haul — Calls</h2>
+    <p style="color:var(--muted);font-size:0.875rem;margin:0 0 1rem">Enter your dashboard password.</p>
+    <label for="api-base">API URL</label>
+    <input id="api-base" type="url" placeholder="https://toledo-swift-haul-api.xxxx.workers.dev" autocomplete="url">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <button type="button" id="login-btn">View Dashboard</button>
+    <p id="login-error" class="error hidden"></p>
+  </div>
+
+  <div id="app-view" class="hidden">
+    <header>
+      <h1>Toledo Swift Haul</h1>
+      <p>Twilio call tracker · (567) 777-3443</p>
+    </header>
+    <main>
+      <div class="toolbar">
+        <button type="button" id="refresh-btn">Refresh</button>
+        <button type="button" id="logout-btn">Log out</button>
+      </div>
+
+      <div class="stats" id="stats" aria-live="polite"></div>
+
+      <h2 class="section-title">Recent calls</h2>
+      <div class="call-list" id="call-list"></div>
+      <p id="empty-msg" class="empty hidden">No calls logged yet. Calls will appear here after someone rings your Twilio number.</p>
+      <p id="load-error" class="error hidden"></p>
+    </main>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
