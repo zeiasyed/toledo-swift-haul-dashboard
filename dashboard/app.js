@@ -190,8 +190,14 @@
         showApp();
         refresh(auth);
       })
-      .catch(function () {
-        loginError.textContent = "Login failed. Check API URL and password.";
+      .catch(function (err) {
+        if (err.message === "auth") {
+          clearAuth();
+          showLogin("Wrong password or API URL.");
+          return;
+        }
+        loginError.textContent =
+          "Could not reach API. Check URL and try again. (" + (err.message || "network error") + ")";
         loginError.classList.remove("hidden");
       });
   });

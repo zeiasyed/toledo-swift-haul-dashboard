@@ -16,13 +16,23 @@ function xmlEscape(s) {
     .replace(/"/g, "&quot;");
 }
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+};
+
+function withCors(headers = {}) {
+  return { ...CORS_HEADERS, ...headers };
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
+    headers: withCors({
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
-    },
+    }),
   });
 }
 
@@ -220,6 +230,10 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: withCors() });
+    }
 
     try {
       if (path === "/voice" && request.method === "POST") {
