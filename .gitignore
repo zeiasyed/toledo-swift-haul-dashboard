@@ -1,0 +1,4 @@
+node_modules/
+deploy-output.json
+.wrangler/
+.dev.vars
