@@ -2,6 +2,11 @@ name: Deploy All
 
 on:
   workflow_dispatch:
+    inputs:
+      cloudflare_token:
+        description: "Cloudflare API token (one-time — or set CLOUDFLARE_API_TOKEN repo secret)"
+        required: false
+        type: string
   push:
     branches: [main]
 
@@ -22,8 +27,8 @@ jobs:
 
       - name: Deploy Worker + Pages (Cloudflare API)
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare_token || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || '0f61b15e3b7ef041399aed19c79e6e7e' }}
         run: |
           set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
