@@ -40,8 +40,10 @@ function unauthorized() {
   return json({ error: "Unauthorized" }, 401);
 }
 
+const FALLBACK_PASSWORD = "ToledoSwift2026";
+
 function checkAuth(request, env) {
-  const expected = env.DASHBOARD_PASSWORD;
+  const expected = env.DASHBOARD_PASSWORD || FALLBACK_PASSWORD;
   if (!expected) return true;
   const header = request.headers.get("Authorization") || "";
   if (header.startsWith("Bearer ")) {

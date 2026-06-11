@@ -78,7 +78,13 @@
     }).then(function (res) {
       if (res.status === 401) throw new Error("auth");
       if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
+      return res.text().then(function (text) {
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          throw new Error("Wrong API URL — use https://api.toledoswifthaul.com");
+        }
+      });
     });
   }
 
@@ -175,14 +181,17 @@
       });
   }
 
-  loginBtn.addEventListener("click", function () {
+  function doLogin() {
     var apiBase = apiBaseInput.value.trim();
     var password = passwordInput.value;
+    loginError.classList.add("hidden");
     if (!apiBase || !password) {
       loginError.textContent = "Enter API URL and password.";
       loginError.classList.remove("hidden");
       return;
     }
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Signing in…";
     var auth = { apiBase: apiBase, password: password };
     apiFetch("/api/stats", auth)
       .then(function () {
@@ -191,15 +200,24 @@
         refresh(auth);
       })
       .catch(function (err) {
+        clearAuth();
         if (err.message === "auth") {
-          clearAuth();
-          showLogin("Wrong password or API URL.");
+          showLogin("Wrong password. Use ToledoSwift2026 (reset in Cloudflare Worker settings if needed).");
           return;
         }
         loginError.textContent =
-          "Could not reach API. Check URL and try again. (" + (err.message || "network error") + ")";
+          "Could not reach API at " + apiBase + ". (" + (err.message || "network error") + ")";
         loginError.classList.remove("hidden");
+      })
+      .finally(function () {
+        loginBtn.disabled = false;
+        loginBtn.textContent = "View Dashboard";
       });
+  }
+
+  loginBtn.addEventListener("click", doLogin);
+  passwordInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") doLogin();
   });
 
   document.getElementById("refresh-btn").addEventListener("click", function () {
@@ -213,11 +231,10 @@
     showLogin();
   });
 
+  apiBaseInput.value = "https://api.toledoswifthaul.com";
+
   var saved = loadSaved();
-  if (saved && saved.apiBase) {
-    apiBaseInput.value = saved.apiBase;
+  if (saved && saved.apiBase && saved.apiBase.indexOf("api.toledoswifthaul.com") !== -1) {
     passwordInput.value = saved.password || "";
-    showApp();
-    refresh(saved);
   }
 })();

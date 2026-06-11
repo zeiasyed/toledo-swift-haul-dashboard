@@ -1,0 +1,98 @@
+name: Deploy All
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-all
+  cancel-in-progress: true
+
+jobs:
+  cloudflare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker + Pages (Cloudflare API)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "Skipping Cloudflare — add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to repo secrets."
+            exit 0
+          fi
+
+          SCRIPT="soft-violet-b153"
+          PROJECT="toledo-swift-haul-app"
+          PASS="ToledoSwift2026"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          curl -sf -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT/secrets" \
+            -H "$AUTH" -H "Content-Type: application/json" \
+            --data "{\"name\":\"DASHBOARD_PASSWORD\",\"text\":\"$PASS\",\"type\":\"secret_text\"}"
+
+          SETTINGS=$(curl -sf \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT/settings" \
+            -H "$AUTH")
+          BINDINGS=$(echo "$SETTINGS" | jq '[.result.bindings[] | select(.type != "secret_text") | if .type == "d1" then {type:"d1",name:.name,id:.id} elif .type == "plain_text" then {type:"plain_text",name:.name,text:.text} else empty end]')
+          METADATA=$(jq -n --argjson bindings "$BINDINGS" '{main_module:"index.js",bindings:$bindings}')
+
+          curl -sf -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT" \
+            -H "$AUTH" \
+            -F "metadata=$METADATA;type=application/json" \
+            -F "index.js=@worker/index.js;type=application/javascript+module"
+
+          hash_file() { openssl dgst -sha256 -binary "$1" | openssl base64 -A; }
+          H1=$(hash_file dashboard/index.html)
+          H2=$(hash_file dashboard/styles.css)
+          H3=$(hash_file dashboard/app.js)
+          MANIFEST=$(jq -n --arg h1 "$H1" --arg h2 "$H2" --arg h3 "$H3" '{"/index.html":$h1,"/styles.css":$h2,"/app.js":$h3}')
+          BOUNDARY="----pages$(openssl rand -hex 8)"
+          BODY=$(mktemp)
+          {
+            printf -- "--%s\r\nContent-Disposition: form-data; name=\"manifest\"\r\nContent-Type: application/json\r\n\r\n%s\r\n" "$BOUNDARY" "$MANIFEST"
+            printf -- "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"index.html\"\r\nContent-Type: application/octet-stream\r\n\r\n" "$BOUNDARY" "$H1"
+            cat dashboard/index.html
+            printf "\r\n"
+            printf -- "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"styles.css\"\r\nContent-Type: application/octet-stream\r\n\r\n" "$BOUNDARY" "$H2"
+            cat dashboard/styles.css
+            printf "\r\n"
+            printf -- "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"app.js\"\r\nContent-Type: application/octet-stream\r\n\r\n" "$BOUNDARY" "$H3"
+            cat dashboard/app.js
+            printf "\r\n"
+            printf -- "--%s--\r\n" "$BOUNDARY"
+          } > "$BODY"
+
+          curl -sf -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments" \
+            -H "$AUTH" \
+            -H "Content-Type: multipart/form-data; boundary=$BOUNDARY" \
+            --data-binary "@$BODY"
+
+          curl -sf "https://api.toledoswifthaul.com/api/stats" -H "Authorization: Bearer $PASS" | jq .
+          echo "Cloudflare deploy complete. Password: $PASS"
+
+  github-pages:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard
+      - id: deployment
+        uses: actions/deploy-pages@v4
