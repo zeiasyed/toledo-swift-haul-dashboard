@@ -28,6 +28,19 @@ const SEO_COMPETITORS = [
 const INDEXNOW_KEY = "tsh2026toledoswiftindexnowkey01";
 const SITE_URL = "https://toledoswifthaul.com";
 const SITEMAP_URL = SITE_URL + "/sitemap.xml";
+const MARKETING_URLS = [
+  SITE_URL,
+  SITE_URL + "/pages/junk-removal-sylvania-oh.html",
+  SITE_URL + "/pages/junk-removal-maumee-oh.html",
+  SITE_URL + "/pages/junk-removal-perrysburg-oh.html",
+  SITE_URL + "/pages/junk-removal-oregon-oh.html",
+  SITE_URL + "/pages/junk-removal-rossford-oh.html",
+  SITE_URL + "/pages/furniture-removal-toledo.html",
+  SITE_URL + "/pages/garage-cleanout-toledo.html",
+  SITE_URL + "/pages/estate-cleanout-toledo.html",
+  SITE_URL + "/pages/appliance-removal-toledo.html",
+  SITE_URL + "/pages/junk-removal-cost-toledo.html",
+];
 
 function todayUtc() {
   return new Date().toISOString().slice(0, 10);
@@ -275,7 +288,7 @@ async function submitIndexNow() {
       host: "toledoswifthaul.com",
       key: INDEXNOW_KEY,
       keyLocation: `${SITE_URL}/${INDEXNOW_KEY}.txt`,
-      urlList: [SITE_URL, SITEMAP_URL],
+      urlList: MARKETING_URLS,
     };
     const res = await fetch("https://api.indexnow.org/indexnow", {
       method: "POST",
@@ -349,6 +362,37 @@ async function handleEvent(request, env) {
   }
 }
 
+async function getLeadCount(env, days) {
+  try {
+    await ensureLeadsSchema(env);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS c FROM leads WHERE created_at >= ?1"
+    )
+      .bind(since.toISOString())
+      .first();
+    return row?.c || 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function ensureLeadsSchema(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      source_path TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at DESC)`
+  ).run();
+}
+
 async function getPhoneClickCount(env, days) {
   try {
     const since = new Date();
@@ -368,13 +412,14 @@ async function getCallStats(env) {
   const week = new Date();
   week.setDate(week.getDate() - 7);
   const phoneClicksWeek = await getPhoneClickCount(env, 7);
+  const formLeadsWeek = await getLeadCount(env, 7);
   const [total, weekCount] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) AS c FROM calls").first(),
     env.DB.prepare("SELECT COUNT(*) AS c FROM calls WHERE created_at >= ?1")
       .bind(week.toISOString())
       .first(),
   ]);
-  return { total: total?.c || 0, week: weekCount?.c || 0, phoneClicksWeek };
+  return { total: total?.c || 0, week: weekCount?.c || 0, phoneClicksWeek, formLeadsWeek };
 }
 
 function computeHealthScore(technical, pageSpeed, integrations) {

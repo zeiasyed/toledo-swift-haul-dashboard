@@ -165,6 +165,8 @@
       (calls.week || 0) +
       '</span></div><div class="card-row"><span>Total tracked calls</span><span>' +
       (calls.total || 0) +
+      '</span></div><div class="card-row"><span>Callback forms (7d)</span><span>' +
+      (calls.formLeadsWeek || 0) +
       '</span></div><div class="card-row"><span>Phone link taps (7d)</span><span>' +
       (calls.phoneClicksWeek || 0) +
       "</span></div>";
@@ -346,24 +348,26 @@
     var integ = snap.integrations || {};
     var items = [
       {
+        name: "Google Business Profile",
+        icon: "B",
+        done: integ.gbp,
+        detail: integ.gbp
+          ? "Connected"
+          : "Claim at business.google.com — use phone (567) 777-3443 and site URL. Send Place ID to enable dashboard tracking.",
+      },
+      {
         name: "Google Search Console",
         icon: "G",
         done: integ.gsc,
         detail: integ.gsc
           ? "Connected"
-          : "Verify domain & add service account to Worker secrets",
+          : "Add property at search.google.com/search-console — paste gscDnsToken in seo-setup.json and redeploy for auto DNS verify",
       },
       {
         name: "Google Analytics 4",
         icon: "A",
         done: integ.ga4,
-        detail: integ.ga4 ? "Measurement ID configured" : "Set GA4_MEASUREMENT_ID secret + site tag",
-      },
-      {
-        name: "Google Business Profile",
-        icon: "B",
-        done: integ.gbp,
-        detail: integ.gbp ? "Connected" : "Claim listing for Toledo Swift Haul",
+        detail: integ.ga4 ? "Measurement ID configured" : "Create GA4 property — paste ga4MeasurementId in seo-setup.json and redeploy (tag auto-injected)",
       },
       {
         name: "SerpAPI (rankings)",

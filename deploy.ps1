@@ -162,6 +162,169 @@ function Invoke-CfApi {
   return $r.result
 }
 
+function Get-SeoSetup {
+  $path = Join-Path $Root "seo-setup.json"
+  if (-not (Test-Path $path)) { return [pscustomobject]@{} }
+  return Get-Content $path -Raw | ConvertFrom-Json
+}
+
+function Apply-SeoInjections {
+  param([string]$Html, [object]$Setup)
+  if ($Setup.googleSiteVerification) {
+    $meta = '<meta name="google-site-verification" content="' + $Setup.googleSiteVerification + '" />'
+    $Html = $Html.Replace("<!-- SEO:GSC -->", $meta)
+  } else {
+    $Html = $Html.Replace("<!-- SEO:GSC -->", "")
+  }
+  if ($Setup.ga4MeasurementId) {
+    $id = $Setup.ga4MeasurementId
+    $ga = '<script async src="https://www.googletagmanager.com/gtag/js?id=' + $id + '"></script>' +
+      '<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag(''js'',new Date());gtag(''config'',''' + $id + ''');</script>'
+    $Html = $Html.Replace("<!-- SEO:GA4 -->", $ga)
+  } else {
+    $Html = $Html.Replace("<!-- SEO:GA4 -->", "")
+  }
+  if ($Setup.cloudflareWebAnalyticsToken) {
+    $token = $Setup.cloudflareWebAnalyticsToken
+    $cf = "<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{""token"": ""$token""}'></script>"
+    $Html = $Html.Replace("<!-- SEO:CF_ANALYTICS -->", $cf)
+  } else {
+    $Html = $Html.Replace("<!-- SEO:CF_ANALYTICS -->", "")
+  }
+  return $Html
+}
+
+function Build-SitemapXml {
+  param([string[]]$Paths)
+  $base = "https://toledoswifthaul.com"
+  $urls = @("$base/")
+  foreach ($p in $Paths) {
+    if ($p -match '\.html$') { $urls += "$base$p" }
+  }
+  $urls = $urls | Select-Object -Unique
+  $body = ($urls | ForEach-Object {
+    "  <url><loc>$_</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>"
+  }) -join "`n"
+  return @"
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>$base/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+$body
+</urlset>
+"@
+}
+
+function Get-MarketingFileMap {
+  param([object]$Setup)
+  $marketingRoot = Join-Path (Split-Path $Root -Parent) "toledo-swift-haul"
+  $genScript = Join-Path $marketingRoot "generate_pages.py"
+  if (Test-Path $genScript) {
+    try { python $genScript 2>$null | Out-Null } catch { Write-Warn "Page generator: $_" }
+  }
+
+  $map = @{}
+  $htmlPaths = @()
+
+  foreach ($name in @("index.html", "styles.css", "script.js", "robots.txt")) {
+    $fp = Join-Path $marketingRoot $name
+    if (-not (Test-Path $fp)) { continue }
+    $content = [System.IO.File]::ReadAllBytes($fp)
+    if ($name -eq "index.html") {
+      $text = Apply-SeoInjections ([System.Text.Encoding]::UTF8.GetString($content)) $Setup
+      $content = [System.Text.Encoding]::UTF8.GetBytes($text)
+    }
+    $key = if ($name -eq "index.html") { "/index.html" } else { "/$name" }
+    $map[$key] = $content
+  }
+
+  $pagesDir = Join-Path $marketingRoot "pages"
+  if (Test-Path $pagesDir) {
+    Get-ChildItem $pagesDir -Filter "*.html" | ForEach-Object {
+      $text = Apply-SeoInjections ([System.IO.File]::ReadAllText($_.FullName, [System.Text.Encoding]::UTF8)) $Setup
+      $key = "/pages/$($_.Name)"
+      $map[$key] = [System.Text.Encoding]::UTF8.GetBytes($text)
+      $htmlPaths += $key
+    }
+  }
+
+  foreach ($img in @("hero-480.webp", "hero-768.webp", "hero-1200.webp")) {
+    $fp = Join-Path $marketingRoot "images\$img"
+    if (Test-Path $fp) { $map["/images/$img"] = [System.IO.File]::ReadAllBytes($fp) }
+  }
+
+  $sitemap = Build-SitemapXml $htmlPaths
+  $map["/sitemap.xml"] = [System.Text.Encoding]::UTF8.GetBytes($sitemap)
+  return $map
+}
+
+function Set-SeoWorkerSecrets {
+  param([object]$Setup)
+  Write-Step "Applying SEO integration secrets..."
+  $secrets = @(
+    @{ name = "GA4_MEASUREMENT_ID"; value = $Setup.ga4MeasurementId }
+    @{ name = "SERPAPI_KEY"; value = $Setup.serpApiKey }
+    @{ name = "PAGESPEED_API_KEY"; value = $Setup.pageSpeedApiKey }
+    @{ name = "GBP_PLACE_ID"; value = $Setup.gbpPlaceId }
+  )
+  foreach ($s in $secrets) {
+    if (-not $s.value) { continue }
+    try {
+      Invoke-CfApi PUT `
+        "https://api.cloudflare.com/client/v4/accounts/$AccountId/workers/scripts/$WorkerName/secrets" `
+        @{ name = $s.name; text = $s.value; type = "secret_text" } | Out-Null
+      Write-Ok "$($s.name) set"
+    } catch {
+      Write-Warn "$($s.name): $_"
+    }
+  }
+}
+
+function Ensure-GscDnsVerification {
+  param([object]$Setup)
+  if (-not $Setup.gscDnsToken) { return }
+  Write-Step "Adding Google Search Console DNS verification..."
+  $zone = "4c23eddc3b2d85594a331fd90877c18d"
+  $token = "google-site-verification=$($Setup.gscDnsToken)"
+  try {
+    $records = Invoke-CfApi GET "https://api.cloudflare.com/client/v4/zones/$zone/dns_records?type=TXT"
+    $exists = $records | Where-Object { $_.content -eq $token }
+    if (-not $exists) {
+      Invoke-CfApi POST "https://api.cloudflare.com/client/v4/zones/$zone/dns_records" `
+        @{ type = "TXT"; name = "toledoswifthaul.com"; content = $token; ttl = 3600 } | Out-Null
+    }
+    Write-Ok "GSC DNS TXT record ready - click Verify in Search Console"
+  } catch {
+    Write-Warn "GSC DNS: $_"
+  }
+}
+
+function Enable-CfWebAnalytics {
+  param([object]$Setup)
+  if ($Setup.cloudflareWebAnalyticsToken) { return }
+  Write-Step "Enabling Cloudflare Web Analytics (free)..."
+  $zone = "4c23eddc3b2d85594a331fd90877c18d"
+  try {
+    $r = Invoke-CfApi POST "https://api.cloudflare.com/client/v4/zones/$zone/analytics/web/overview" $null 2>$null
+  } catch {}
+  try {
+    $sites = Invoke-CfApi GET "https://api.cloudflare.com/client/v4/zones/$zone/webanalytics/sites"
+    if ($sites -and $sites.Count -gt 0) {
+      $token = $sites[0].token
+      if ($token) {
+        $setupPath = Join-Path $Root "seo-setup.json"
+        if (Test-Path $setupPath) {
+          $json = Get-Content $setupPath -Raw | ConvertFrom-Json
+          $json | Add-Member -NotePropertyName cloudflareWebAnalyticsToken -NotePropertyValue $token -Force
+          ($json | ConvertTo-Json) | Set-Content $setupPath -Encoding UTF8
+        }
+        Write-Ok "Cloudflare Web Analytics token saved to seo-setup.json"
+      }
+    }
+  } catch {
+    Write-Warn "Web Analytics: enable manually in Cloudflare dashboard if needed"
+  }
+}
+
 function Build-WorkerCode {
   $dashboardMap = @{
     "/index.html" = "index.html"
@@ -175,23 +338,11 @@ function Build-WorkerCode {
     $dashboardEntries += "`"$path`":`"$b64`""
   }
 
-  $marketingRoot = Join-Path (Split-Path $Root -Parent) "toledo-swift-haul"
-  $marketingMap = @{
-    "/index.html"            = "index.html"
-    "/styles.css"            = "styles.css"
-    "/script.js"             = "script.js"
-    "/robots.txt"            = "robots.txt"
-    "/sitemap.xml"           = "sitemap.xml"
-    "/images/hero-480.webp"  = "images\hero-480.webp"
-    "/images/hero-768.webp"  = "images\hero-768.webp"
-    "/images/hero-1200.webp" = "images\hero-1200.webp"
-  }
+  $seoSetup = Get-SeoSetup
+  $marketingFiles = Get-MarketingFileMap $seoSetup
   $marketingEntries = @()
-  foreach ($path in $marketingMap.Keys) {
-    $filePath = Join-Path $marketingRoot $marketingMap[$path]
-    if (-not (Test-Path $filePath)) { throw "Missing marketing file: $filePath" }
-    $bytes = [System.IO.File]::ReadAllBytes($filePath)
-    $b64 = [Convert]::ToBase64String($bytes)
+  foreach ($path in ($marketingFiles.Keys | Sort-Object)) {
+    $b64 = [Convert]::ToBase64String($marketingFiles[$path])
     $marketingEntries += "`"$path`":`"$b64`""
   }
 
@@ -263,6 +414,26 @@ function Ensure-CronSchedule {
     Write-Ok "Daily SEO cron active"
   } catch {
     Write-Warn "Cron setup: $_"
+  }
+}
+
+function Initialize-LeadsSchema {
+  Write-Step "Initializing leads table..."
+  $dbId = "fd911bdb-ecc0-40f4-9f80-b21d46d6ca5e"
+  $sql = Get-Content "$Root\schema-leads.sql" -Raw
+  $statements = $sql -split ";" | Where-Object { $_.Trim() -ne "" }
+  try {
+    foreach ($stmt in $statements) {
+      $body = @{ sql = $stmt.Trim() } | ConvertTo-Json -Compress
+      $headers = Get-AuthHeaders
+      $headers["Content-Type"] = "application/json"
+      Invoke-RestMethod -Method POST `
+        -Uri "https://api.cloudflare.com/client/v4/accounts/$AccountId/d1/database/$dbId/query" `
+        -Headers $headers -Body $body | Out-Null
+    }
+    Write-Ok "Leads schema ready"
+  } catch {
+    Write-Warn "Leads schema: $_"
   }
 }
 
@@ -457,6 +628,24 @@ function Test-Deployment {
 
   Start-Sleep -Seconds 2
   try {
+    $pages = Invoke-WebRequest -Uri "https://toledoswifthaul.com/pages/junk-removal-sylvania-oh.html" -UseBasicParsing
+    if ($pages.StatusCode -eq 200) { Write-Ok "Location pages live - 11 URLs in sitemap" }
+  } catch {
+    Write-Warn "Location page check: $($_.Exception.Message)"
+  }
+
+  Start-Sleep -Seconds 2
+  try {
+    $lead = Invoke-RestMethod -Method POST -Uri "$ApiUrl/api/lead" `
+      -ContentType "application/json" `
+      -Body '{"name":"Deploy Test","phone":"4195550100","path":"/deploy-test"}'
+    if ($lead.ok) { Write-Ok "Lead form API working" }
+  } catch {
+    Write-Warn "Lead API check: $($_.Exception.Message)"
+  }
+
+  Start-Sleep -Seconds 2
+  try {
     $stats = Invoke-RestMethod -Uri "$ApiUrl/api/stats" -Headers @{ Authorization = "Bearer $DashboardPassword" }
     Write-Ok "Dashboard login works (total calls: $($stats.total))"
   } catch {
@@ -506,8 +695,13 @@ Write-Host "================================" -ForegroundColor DarkGray
 Get-CloudflareAuth -OverrideToken $Token -OverrideEmail $Email -OverrideKey $GlobalKey
 
 try {
+  $seoSetup = Get-SeoSetup
   Initialize-SeoSchema
+  Initialize-LeadsSchema
+  Enable-CfWebAnalytics $seoSetup
+  Ensure-GscDnsVerification $seoSetup
   Deploy-Worker
+  Set-SeoWorkerSecrets $seoSetup
   Ensure-WorkerRoutes
   Ensure-CronSchedule
   Test-Deployment

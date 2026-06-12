@@ -228,6 +228,27 @@ async function handleCalls(request, env) {
   return json({ calls: results || [] });
 }
 
+async function handleLead(request, env) {
+  if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  try {
+    await ensureLeadsSchema(env);
+    const body = await request.json();
+    const name = String(body.name || "").trim().slice(0, 120);
+    const phone = String(body.phone || "").trim().slice(0, 40);
+    const sourcePath = String(body.path || "").slice(0, 200) || null;
+    if (!name || !phone) return json({ error: "Name and phone required" }, 400);
+    await env.DB.prepare(
+      "INSERT INTO leads (name, phone, source_path) VALUES (?1, ?2, ?3)"
+    )
+      .bind(name, phone, sourcePath)
+      .run();
+    return json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    return json({ error: "Could not save lead" }, 500);
+  }
+}
+
 const DASHBOARD_HOSTS = new Set(["app.toledoswifthaul.com"]);
 const DASHBOARD_PREFIX = "/dashboard";
 const MARKETING_HOSTS = new Set(["toledoswifthaul.com", "www.toledoswifthaul.com"]);
@@ -241,6 +262,15 @@ function serveMarketing(pathname) {
   let path = pathname || "/";
   if (path === "/" || path === "") path = "/index.html";
   if (!path.startsWith("/")) path = "/" + path;
+  if (!files[path] && !path.includes(".")) path = path + ".html";
+  if (!files[path] && path.endsWith(".html")) {
+    const alt = "/pages" + path;
+    if (files[alt]) path = alt;
+  }
+  if (!files[path] && path.startsWith("/pages/") && !path.endsWith(".html")) {
+    const alt = path + ".html";
+    if (files[alt]) path = alt;
+  }
 
   const b64 = files[path] || files["/index.html"];
   if (!b64) return new Response("Not found", { status: 404 });
@@ -255,6 +285,7 @@ function serveMarketing(pathname) {
     "/images/hero-768.webp": "image/webp",
     "/images/hero-1200.webp": "image/webp",
   };
+  if (path.endsWith(".html")) types[path] = "text/html; charset=utf-8";
 
   return new Response(decodeAsset(b64), {
     headers: {
@@ -356,6 +387,9 @@ export default {
       }
       if (path === "/api/event" && request.method === "POST") {
         return handleEvent(request, env);
+      }
+      if (path === "/api/lead" && request.method === "POST") {
+        return handleLead(request, env);
       }
       if (path === "/health") {
         return json({ ok: true, service: "toledo-swift-haul-api" });

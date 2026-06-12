@@ -1,4 +1,8 @@
 node_modules/
 deploy-output.json
+.cloudflare-token
+.cloudflare-credentials.json
+.playwright-cf-profile/
 .wrangler/
 .dev.vars
+seo-setup.json
