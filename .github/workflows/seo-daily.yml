@@ -1,0 +1,26 @@
+name: SEO Daily Automation
+
+on:
+  schedule:
+    # 8:00 AM Eastern (13:00 UTC)
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-seo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run daily SEO audit + search engine pings
+        run: |
+          set -euo pipefail
+          echo "Triggering SEO refresh..."
+          RESULT=$(curl -sf -X POST "https://api.toledoswifthaul.com/api/seo/refresh" \
+            -H "Authorization: Bearer ToledoSwift2026" \
+            -H "Content-Type: application/json")
+          echo "$RESULT" | jq .
+          echo "SEO automation complete."
+
+      - name: Verify overview
+        run: |
+          curl -sf "https://api.toledoswifthaul.com/api/seo/overview" \
+            -H "Authorization: Bearer ToledoSwift2026" | jq '{healthScore, lastUpdated: .lastUpdated}'

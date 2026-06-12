@@ -45,7 +45,7 @@
   }
 
   function fmtTime(iso) {
-    if (!iso) return "—";
+    if (!iso) return "-";
     var d = new Date(iso);
     return d.toLocaleString(undefined, {
       month: "short",
@@ -82,7 +82,7 @@
         try {
           return JSON.parse(text);
         } catch (e) {
-          throw new Error("Wrong API URL — use https://api.toledoswifthaul.com");
+          throw new Error("Wrong API URL - use https://api.toledoswifthaul.com");
         }
       });
     });
@@ -147,7 +147,7 @@
         html +=
           '<div class="call-actions"><a href="' +
           escapeHtml(call.recording_url) +
-          '" target="_blank" rel="noopener">Play voicemail</a></div>";
+          '" target="_blank" rel="noopener">Play voicemail</a></div>';
       }
 
       card.innerHTML = html;
@@ -191,7 +191,7 @@
       return;
     }
     loginBtn.disabled = true;
-    loginBtn.textContent = "Signing in…";
+    loginBtn.textContent = "Signing in...";
     var auth = { apiBase: apiBase, password: password };
     apiFetch("/api/stats", auth)
       .then(function () {
@@ -231,10 +231,9 @@
     showLogin();
   });
 
-  apiBaseInput.value = "https://api.toledoswifthaul.com";
-
-  var saved = loadSaved();
-  if (saved && saved.apiBase && saved.apiBase.indexOf("api.toledoswifthaul.com") !== -1) {
-    passwordInput.value = saved.password || "";
+  if (window.location.pathname.indexOf("/dashboard") === 0) {
+    apiBaseInput.value = window.location.origin;
+  } else {
+    apiBaseInput.value = "https://api.toledoswifthaul.com";
   }
 })();

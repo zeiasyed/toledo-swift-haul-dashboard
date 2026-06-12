@@ -228,6 +228,84 @@ async function handleCalls(request, env) {
   return json({ calls: results || [] });
 }
 
+const DASHBOARD_HOSTS = new Set(["app.toledoswifthaul.com"]);
+const DASHBOARD_PREFIX = "/dashboard";
+const MARKETING_HOSTS = new Set(["toledoswifthaul.com", "www.toledoswifthaul.com"]);
+
+function serveMarketing(pathname) {
+  const files = typeof MARKETING_B64 !== "undefined" ? MARKETING_B64 : null;
+  if (!files) {
+    return new Response("Site not deployed. Run deploy.ps1", { status: 503 });
+  }
+
+  let path = pathname || "/";
+  if (path === "/" || path === "") path = "/index.html";
+  if (!path.startsWith("/")) path = "/" + path;
+
+  const b64 = files[path] || files["/index.html"];
+  if (!b64) return new Response("Not found", { status: 404 });
+
+  const types = {
+    "/index.html": "text/html; charset=utf-8",
+    "/styles.css": "text/css; charset=utf-8",
+    "/script.js": "application/javascript; charset=utf-8",
+    "/robots.txt": "text/plain; charset=utf-8",
+    "/sitemap.xml": "application/xml; charset=utf-8",
+    "/images/hero-480.webp": "image/webp",
+    "/images/hero-768.webp": "image/webp",
+    "/images/hero-1200.webp": "image/webp",
+  };
+
+  return new Response(decodeAsset(b64), {
+    headers: {
+      "Content-Type": types[path] || "application/octet-stream",
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+function decodeAsset(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function serveDashboard(pathname) {
+  const files = typeof DASHBOARD_B64 !== "undefined" ? DASHBOARD_B64 : null;
+  if (!files) {
+    return new Response("Dashboard not deployed. Run deploy.ps1", { status: 503 });
+  }
+
+  let path = pathname || "/";
+  if (path.startsWith(DASHBOARD_PREFIX)) {
+    path = path.slice(DASHBOARD_PREFIX.length) || "/";
+  }
+  if (path === "/" || path === "") path = "/index.html";
+  if (!path.startsWith("/")) path = "/" + path;
+
+  const b64 = files[path] || files["/index.html"];
+  if (!b64) return new Response("Not found", { status: 404 });
+
+  const types = {
+    "/index.html": "text/html; charset=utf-8",
+    "/styles.css": "text/css; charset=utf-8",
+    "/app.js": "application/javascript; charset=utf-8",
+  };
+
+  return new Response(decodeAsset(b64), {
+    headers: {
+      "Content-Type": types[path] || "text/plain; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+function isDashboardRequest(url) {
+  if (DASHBOARD_HOSTS.has(url.hostname)) return true;
+  return url.pathname === DASHBOARD_PREFIX || url.pathname.startsWith(DASHBOARD_PREFIX + "/");
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -238,6 +316,23 @@ export default {
     }
 
     try {
+      if (MARKETING_HOSTS.has(url.hostname)) {
+        const indexNow = serveIndexNowKey(url.pathname);
+        if (indexNow) return indexNow;
+        return serveMarketing(url.pathname);
+      }
+
+      if (isDashboardRequest(url)) {
+        return serveDashboard(url.pathname);
+      }
+
+      if (isSeoDashboardRequest(url)) {
+        return serveSeoDashboard(url.pathname);
+      }
+
+      const seoApi = await handleSeoApi(path, request.method, request, env, checkAuth);
+      if (seoApi) return seoApi;
+
       if (path === "/voice" && request.method === "POST") {
         return handleVoice(request, env);
       }
@@ -259,6 +354,9 @@ export default {
       if (path === "/api/calls" && request.method === "GET") {
         return handleCalls(request, env);
       }
+      if (path === "/api/event" && request.method === "POST") {
+        return handleEvent(request, env);
+      }
       if (path === "/health") {
         return json({ ok: true, service: "toledo-swift-haul-api" });
       }
@@ -268,5 +366,9 @@ export default {
       console.error(err);
       return json({ error: "Server error" }, 500);
     }
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runDailySeo(env));
   },
 };
